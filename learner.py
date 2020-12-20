@@ -18,8 +18,8 @@ class CartPoleLearner:
             self,
             batch_size=64,
             device='cpu',
-            gamma=0.95,
-            gradient_clip=0.0,
+            gamma=0.99,
+            gradient_clip=1.0,
             loss_fn='L2',
     ):
         self.env = gym.make('CartPole-v0')
@@ -30,8 +30,9 @@ class CartPoleLearner:
         self.qnet = CartPolePolicy(self.input_size, self.num_actions, device)
         self.target_qnet = CartPolePolicy(self.input_size, self.num_actions, device)
         self.target_qnet.copy_params_(self.qnet)
+        self.target_qnet.net.eval() # 학습 스케일이 커짐에 따라 문제가 되는게 이거일듯 -> 아님. 상관없음
 
-        self.eps_sch = LinearEpsilonScheduler()
+        self.eps_sch = LinearEpsilonScheduler(initial_eps=.2, initial_exploration_frame=0)
 
         self.optimizer = optim.Adam(self.qnet.parameters(), lr=1e-4)
 
@@ -90,11 +91,14 @@ class CartPoleLearner:
         episode, frame = 1, 1
 
         pbar = tqdm(total=max_frame)
+        score = 0
         while frame < max_frame:
             prev_state = self.env.reset()
             episode_reward = 0
-
+            
             for step in range(1, 300):
+            # done = False
+            # while not done:
                 s = torch.from_numpy(prev_state).view(-1, self.input_size).float().to(self.device)
 
                 if random.random() < self.eps_sch.get_epsilon(frame):
@@ -104,13 +108,8 @@ class CartPoleLearner:
                         action = self.qnet.get_greedy(s).item()
 
                 state, reward, done, _ = self.env.step(action)
-
-                if frame % 4 == 0:
-                    data = self.replay.sample(self.batch_size)
-                    self.update_(data, self.device)
-
-                if frame % target_update_frequency == 0:
-                    self.target_qnet.copy_params_(self.qnet)
+                self.replay.push(prev_state, action, reward, state, done)
+                prev_state = state
 
                 episode_reward += reward
                 frame += 1
@@ -119,10 +118,17 @@ class CartPoleLearner:
                 if done:
                     break
 
-                self.replay.push(prev_state, action, reward, state, done)
-                prev_state = state
+            score += episode_reward
+            for i in range(5): # 여러개의 샘플로 업데이트 할 수 있도록 여러번 업데이트
+                data = self.replay.sample(self.batch_size)
+                self.update_(data, self.device)
+            # step 도중에 target 이 변하는건 말이 안돼
+            # if frame % target_update_frequency == 0:
+            if episode % 10 ==0:
+                self.target_qnet.copy_params_(self.qnet)
+                print(f"score = {score / episode} n_episode = {episode} reward = {episode_reward}, eps={self.eps_sch.get_epsilon(frame)}")
 
-            writer.add_scalar('EpisodeLength', step, frame)
+            # writer.add_scalar('EpisodeLength', step, frame)
             writer.add_scalar('Reward', episode_reward, frame)
             writer.add_scalar('Epsilon', self.eps_sch.get_epsilon(frame), frame)
 

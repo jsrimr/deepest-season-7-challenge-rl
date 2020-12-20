@@ -25,13 +25,16 @@ class LinearEpsilonScheduler:
         self.max_frame = max_exploration_frame
 
     def get_epsilon(self, frame):
+        # progress = (frame - self.init_frame) / (self.max_frame - self.init_frame)
+        # return max(0.01, 0.08 - 0.01*progress)
         if frame < self.init_frame:
             return self.initial_eps
         elif frame > self.max_frame:
             return self.final_eps
         else:
             progress = (frame - self.init_frame) / (self.max_frame - self.init_frame)
-            return self.initial_eps + (self.final_eps - self.initial_eps) * progress
+            # return self.initial_eps + (self.final_eps - self.initial_eps) * progress
+            return self.final_eps + (self.initial_eps - self.final_eps) * np.exp(-progress)
 
 
 def set_seed(seed):
